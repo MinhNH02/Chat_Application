@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: chat-demo
+  
+  datasource:
+    url: jdbc:postgresql://localhost:5432/chatdemo
+    username: postgres
+    password: Haiminh1002@
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+server:
+  port: 8081
+
+# Platform Configuration
+platform:
+  telegram:
+    bot-token: "8276716956:AAGEGKI3nFVxhvvEyyaEl2D4vU5NBYGGqlI"
+    api-url: https://api.telegram.org/bot
+    webhook-url: ${TELEGRAM_WEBHOOK_URL:http://localhost:8081/webhook/telegram}
+
+# Auto-reply configuration
+omnichannel:
+  auto-reply:
+    enabled: true
+    welcome-message: "Xin chào! Chúng tôi sẽ phản hồi bạn sớm nhất có thể."
+
+app:
+  open-browser:
+    enabled: true
+    url: http://localhost:8081/swagger-ui.html
