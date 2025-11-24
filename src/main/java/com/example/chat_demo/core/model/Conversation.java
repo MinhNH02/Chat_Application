@@ -5,6 +5,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "conversations")
@@ -19,6 +21,9 @@ public class Conversation {
     @ManyToOne
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+    
+    @OneToMany(mappedBy = "conversation", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private List<Message> messages = new ArrayList<>();
     
     @Column(name = "ticket_id")
     private String ticketId;

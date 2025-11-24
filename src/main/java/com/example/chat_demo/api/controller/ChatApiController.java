@@ -6,7 +6,6 @@ import com.example.chat_demo.core.model.Message;
 import com.example.chat_demo.core.model.User;
 import com.example.chat_demo.core.repository.ConversationRepository;
 import com.example.chat_demo.core.repository.MessageRepository;
-import com.example.chat_demo.core.repository.UserRepository;
 import com.example.chat_demo.omnichannel.bus.OmnichannelMessageBus;
 import com.example.chat_demo.omnichannel.connector.ConnectorFactory;
 import com.example.chat_demo.omnichannel.connector.PlatformConnector;
@@ -18,7 +17,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -26,6 +24,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -42,7 +41,6 @@ public class ChatApiController {
     
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;
-    private final UserRepository userRepository;
     private final OmnichannelMessageBus messageBus;
     private final ConnectorFactory connectorFactory;
     
@@ -68,57 +66,35 @@ public class ChatApiController {
     }
     
     /**
-     * Lấy thông tin 1 conversation
+     * Lấy thông tin conversation kèm 50 tin nhắn gần nhất
+     * - Mặc định: load 50 tin nhắn gần nhất
+     * - Scroll lên: dùng before={message_id} để load tin cũ hơn
      */
-    @Operation(summary = "Chi tiết conversation", description = "Lấy thông tin chi tiết của 1 hội thoại theo ID.")
+    @Operation(summary = "Chi tiết conversation với lịch sử chat", 
+              description = "Lấy thông tin conversation và 50 tin nhắn gần nhất. Dùng before={message_id} để load tin cũ hơn khi scroll lên.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Thông tin hội thoại",
-                    content = @Content(mediaType = "application/json", schema = @Schema(implementation = ConversationDto.class))),
+            @ApiResponse(responseCode = "200", description = "Thông tin conversation và messages",
+                    content = @Content(mediaType = "application/json", schema = @Schema(implementation = ConversationDetailDto.class))),
             @ApiResponse(responseCode = "404", description = "Không tìm thấy hội thoại")
     })
     @GetMapping("/conversations/{id}")
-    public ResponseEntity<ConversationDto> getConversation(@PathVariable Long id) {
-        log.info("[API] GET /api/conversations/{} requested", id);
-        Conversation conversation = conversationRepository.findById(id)
-            .orElseThrow(() -> new RuntimeException("Conversation not found"));
-        log.info("Fetched conversation {} for user {}", conversation.getId(), conversation.getUser().getId());
-        
-        return ResponseEntity.ok(toConversationDto(conversation));
-    }
-    
-    /**
-     * Lấy messages của 1 conversation (có phân trang)
-     */
-    @Operation(summary = "Danh sách tin nhắn", description = "Lấy danh sách tin nhắn của một hội thoại (có phân trang).")
-    @ApiResponse(responseCode = "200", description = "Danh sách tin nhắn",
-            content = @Content(mediaType = "application/json", schema = @Schema(implementation = MessagePageDto.class)))
-    @GetMapping("/conversations/{id}/messages")
-    public ResponseEntity<MessagePageDto> getMessages(
+    public ResponseEntity<ConversationDetailDto> getConversation(
             @PathVariable Long id,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "50") int size) {
-        log.info("[API] GET /api/conversations/{}/messages?page={}&size={} requested", id, page, size);
+            @RequestParam(required = false) Long before,  // Load tin cũ hơn message_id này (scroll lên)
+            @RequestParam(defaultValue = "50") int limit) {
+        log.info("[API] GET /api/conversations/{}?before={}&limit={} requested", id, before, limit);
         
+        // Tìm conversation
         Conversation conversation = conversationRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("Conversation not found"));
         
-        Pageable pageable = PageRequest.of(page, size, 
-            Sort.by(Sort.Direction.ASC, "receivedAt"));
+        // Load messages và build response
+        ConversationDetailDto response = buildConversationDetailDto(conversation, before, limit);
         
-        Page<Message> messagePage = messageRepository.findByConversation(conversation, pageable);
-        log.info("Fetched {} messages (page {}/{}) for conversation {}", messagePage.getNumberOfElements(), page, messagePage.getTotalPages(), conversation.getId());
+        log.info("Fetched conversation {} with {} messages (hasMore={}, totalCount={})", 
+            conversation.getId(), response.getMessages().size(), response.isHasMore(), response.getTotalCount());
         
-        List<MessageDto> messages = messagePage.getContent().stream()
-            .map(this::toMessageDto)
-            .collect(Collectors.toList());
-        
-        MessagePageDto pageDto = new MessagePageDto();
-        pageDto.setMessages(messages);
-        pageDto.setTotalPages(messagePage.getTotalPages());
-        pageDto.setTotalElements(messagePage.getTotalElements());
-        pageDto.setCurrentPage(page);
-        
-        return ResponseEntity.ok(pageDto);
+        return ResponseEntity.ok(response);
     }
     
     /**
@@ -167,12 +143,103 @@ public class ChatApiController {
     }
     
     // Helper methods
+    
+    /**
+     * Load messages với infinite scroll logic
+     */
+    private MessageListDto loadMessages(Conversation conversation, Long before, int limit) {
+        List<Message> messages;
+        boolean hasMore;
+        Pageable pageable = PageRequest.of(0, limit + 1); // Load thêm 1 để check hasMore
+        
+        if (before != null) {
+            // Scroll lên: load tin cũ hơn message_id
+            messages = messageRepository.findOlderMessages(conversation, before, pageable);
+            hasMore = messages.size() > limit;
+            if (hasMore) {
+                messages = messages.subList(0, limit);
+            }
+        } else {
+            // Lần đầu: load tin mới nhất
+            messages = messageRepository.findLatestMessages(conversation, pageable);
+            hasMore = messages.size() > limit;
+            if (hasMore) {
+                messages = messages.subList(0, limit);
+            }
+            // Reverse để hiển thị từ cũ đến mới (giống chat app)
+            Collections.reverse(messages);
+        }
+        
+        // Convert to DTO
+        List<MessageDto> messageDtos = messages.stream()
+            .map(this::toMessageDto)
+            .collect(Collectors.toList());
+        
+        // Build response
+        MessageListDto response = new MessageListDto();
+        response.setMessages(messageDtos);
+        response.setHasMore(hasMore);
+        
+        if (!messages.isEmpty()) {
+            response.setOldestMessageId(messages.get(0).getId());
+            response.setNewestMessageId(messages.get(messages.size() - 1).getId());
+        }
+        
+        // Đếm tổng số tin nhắn
+        long totalCount = messageRepository.countByConversation(conversation);
+        response.setTotalCount((int) totalCount);
+        
+        return response;
+    }
+    
+    /**
+     * Build ConversationDetailDto từ conversation và messages
+     */
+    private ConversationDetailDto buildConversationDetailDto(Conversation conversation, Long before, int limit) {
+        ConversationDetailDto response = new ConversationDetailDto();
+        
+        // Conversation info
+        populateConversationInfo(response, conversation);
+        
+        // Load messages
+        MessageListDto messageList = loadMessages(conversation, before, limit);
+        response.setMessages(messageList.getMessages());
+        response.setHasMore(messageList.isHasMore());
+        response.setOldestMessageId(messageList.getOldestMessageId());
+        response.setNewestMessageId(messageList.getNewestMessageId());
+        response.setTotalCount(messageList.getTotalCount());
+        
+        return response;
+    }
+    
+    /**
+     * Populate conversation info vào DTO
+     */
+    private void populateConversationInfo(ConversationDetailDto dto, Conversation conv) {
+        dto.setId(conv.getId());
+        dto.setUserId(conv.getUser().getId());
+        dto.setUserName(formatUserName(conv.getUser()));
+        dto.setUserPlatformId(conv.getUser().getPlatformUserId());
+        dto.setChannelType(conv.getUser().getChannelType().name());
+        dto.setStatus(conv.getStatus());
+        dto.setStartedAt(conv.getStartedAt());
+        dto.setLastMessageAt(conv.getLastMessageAt());
+    }
+    
+    /**
+     * Format user name từ firstName và lastName
+     */
+    private String formatUserName(User user) {
+        String firstName = user.getFirstName() != null ? user.getFirstName() : "";
+        String lastName = user.getLastName() != null ? user.getLastName() : "";
+        return (firstName + " " + lastName).trim();
+    }
+    
     private ConversationDto toConversationDto(Conversation conv) {
         ConversationDto dto = new ConversationDto();
         dto.setId(conv.getId());
         dto.setUserId(conv.getUser().getId());
-        dto.setUserName(conv.getUser().getFirstName() + " " + 
-            (conv.getUser().getLastName() != null ? conv.getUser().getLastName() : ""));
+        dto.setUserName(formatUserName(conv.getUser()));
         dto.setUserPlatformId(conv.getUser().getPlatformUserId());
         dto.setChannelType(conv.getUser().getChannelType().name());
         dto.setStatus(conv.getStatus());
@@ -186,12 +253,28 @@ public class ChatApiController {
         dto.setId(msg.getId());
         dto.setContent(msg.getContent());
         dto.setMessageType(msg.getMessageType());
-        dto.setDirection(msg.getDirection().name());
-        dto.setStatus(msg.getStatus().name());
+        
+        // Xử lý null cho direction và status
+        if (msg.getDirection() != null) {
+            dto.setDirection(msg.getDirection().name());
+        }
+        if (msg.getStatus() != null) {
+            dto.setStatus(msg.getStatus().name());
+        }
+        
         dto.setReceivedAt(msg.getReceivedAt());
         dto.setSentAt(msg.getSentAt());
-        dto.setUserId(msg.getUser().getId());
-        dto.setUserName(msg.getUser().getFirstName());
+        
+        // Xử lý null cho user
+        if (msg.getUser() != null) {
+            dto.setUserId(msg.getUser().getId());
+            dto.setUserName(
+                msg.getUser().getFirstName() != null ? 
+                    msg.getUser().getFirstName() : 
+                    "Unknown"
+            );
+        }
+        
         return dto;
     }
 }

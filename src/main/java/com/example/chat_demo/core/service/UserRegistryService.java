@@ -53,6 +53,7 @@ public class UserRegistryService {
     
     /**
      * Kiểm tra user có phải là user mới không (check trước khi register)
+     * Dùng để quyết định có gửi welcome message không
      */
     public boolean isNewUser(UnifiedMessage unifiedMessage) {
         boolean isNew = !userRepository.existsByPlatformUserIdAndChannelType(

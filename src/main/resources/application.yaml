@@ -16,6 +16,12 @@ spring:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
+  
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
 
 server:
   port: 8081
@@ -36,9 +42,4 @@ platform:
 omnichannel:
   auto-reply:
     enabled: true
-    welcome-message: "Xin chào! Chúng tôi sẽ phản hồi bạn sớm nhất có thể."
-
-app:
-  open-browser:
-    enabled: true
-    url: http://localhost:8081/swagger-ui.html
+    welcome-message: "Xin chào! Cảm ơn ban đã liên hệ! Chúng tôi sẽ phản hồi bạn sớm nhất có thể."
