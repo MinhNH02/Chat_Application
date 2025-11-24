@@ -26,6 +26,11 @@ platform:
     bot-token: "8276716956:AAGEGKI3nFVxhvvEyyaEl2D4vU5NBYGGqlI"
     api-url: https://api.telegram.org/bot
     webhook-url: ${TELEGRAM_WEBHOOK_URL:http://localhost:8081/webhook/telegram}
+  
+  messenger:
+    page-access-token: ${MESSENGER_PAGE_TOKEN:}
+    verify-token: ${MESSENGER_VERIFY_TOKEN:}
+    api-url: https://graph.facebook.com/v18.0
 
 # Auto-reply configuration
 omnichannel:

@@ -53,6 +53,19 @@ platform:
     bot-token: "8276716956:AAFsZ..."
 ```
 
+### 3.3. (Tuỳ chọn) Chuẩn bị Messenger
+- Tạo Facebook App, gắn với một Facebook Page.
+- Lấy **Page Access Token** và **Verify Token**.
+- Xuất các biến môi trường (hoặc cập nhật `application.yaml`):
+  ```powershell
+  $env:MESSENGER_PAGE_TOKEN="EAAN..."
+  $env:MESSENGER_VERIFY_TOKEN="your-verify-token"
+  ```
+- Sau khi backend chạy và ngrok có URL, vào Facebook Developer > App > Messenger để đăng ký webhook:
+  - Callback URL: `https://<ngrok-url>/webhook/messenger`
+  - Verify token: dùng đúng giá trị bạn đặt ở trên.
+- Khi webhook Messenger đã verify thành công, Facebook sẽ gửi event tới backend giống Telegram.
+
 ---
 
 ## 4. Khởi động ứng dụng
@@ -114,15 +127,15 @@ Invoke-WebRequest -Uri "https://api.telegram.org/bot$token/setWebhook?url=$webho
    - `Saved inbound message ...`
    - `Welcome message dispatched ...`
 
-### 6.2. Kiểm tra DB
-1. Truy cập `http://localhost:8081/h2-console`.
-2. JDBC URL: `jdbc:h2:mem:chatdb`, user `sa`, password rỗng.
-3. Query:
+### 6.2. Kiểm tra DB (PostgreSQL)
+1. Kết nối PostgreSQL (psql, pgAdmin, DBeaver) tới DB `chatdemo` với user `postgres`.
+2. Chạy:
    ```sql
-   SELECT * FROM USERS;
-   SELECT * FROM CONVERSATIONS;
-   SELECT * FROM MESSAGES;
+   SELECT * FROM users;
+   SELECT * FROM conversations;
+   SELECT * FROM messages;
    ```
+3. Bạn sẽ thấy user/tin nhắn đã được lưu (không còn dùng H2 console).
 
 ### 6.3. Staff Dashboard APIs (Swagger UI)
 Mở `http://localhost:8081/swagger-ui.html` → các nhóm:
@@ -208,3 +221,6 @@ platform:
 
 Hoàn tất! Dự án hiện tập trung vào luồng Omnichannel cơ bản cho Telegram. Khi cần, bạn có thể mở rộng thêm các nền tảng khác trong tương lai.
 
+PS C:\Users\minhf> $token = "8276716956:AAGEGKI3nFVxhvvEyyaEl2D4vU5NBYGGqlI"
+PS C:\Users\minhf> $webhook = "https://exhaustingly-nonshrinkable-roosevelt.ngrok-free.dev/webhook/telegram"
+PS C:\Users\minhf> Invoke-WebRequest -Uri "https://api.telegram.org/bot$token/setWebhook?url=$webhook" -Method Post
