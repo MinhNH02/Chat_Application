@@ -117,9 +117,22 @@ public class ChatApiController {
         // Lấy connector tương ứng
         PlatformConnector connector = connectorFactory.getConnector(user.getChannelType());
         
+        // Xác định recipient ID: Discord dùng channel ID, các platform khác dùng user ID
+        String recipientId;
+        if (user.getChannelType() == com.example.chat_demo.common.ChannelType.DISCORD) {
+            // Discord: dùng channel ID từ conversation
+            recipientId = conversation.getChannelId();
+            if (recipientId == null || recipientId.isBlank()) {
+                throw new RuntimeException("Discord conversation missing channel ID");
+            }
+        } else {
+            // Telegram, Messenger, etc.: dùng user ID
+            recipientId = user.getPlatformUserId();
+        }
+        
         // Gửi message qua platform
         try {
-            connector.sendMessage(user.getPlatformUserId(), request.getContent());
+            connector.sendMessage(recipientId, request.getContent());
         } catch (Exception e) {
             log.error("Failed to send message via connector", e);
             throw new RuntimeException("Failed to send message", e);
@@ -256,10 +269,10 @@ public class ChatApiController {
         
         // Xử lý null cho direction và status
         if (msg.getDirection() != null) {
-            dto.setDirection(msg.getDirection().name());
+        dto.setDirection(msg.getDirection().name());
         }
         if (msg.getStatus() != null) {
-            dto.setStatus(msg.getStatus().name());
+        dto.setStatus(msg.getStatus().name());
         }
         
         dto.setReceivedAt(msg.getReceivedAt());
@@ -267,7 +280,7 @@ public class ChatApiController {
         
         // Xử lý null cho user
         if (msg.getUser() != null) {
-            dto.setUserId(msg.getUser().getId());
+        dto.setUserId(msg.getUser().getId());
             dto.setUserName(
                 msg.getUser().getFirstName() != null ? 
                     msg.getUser().getFirstName() : 

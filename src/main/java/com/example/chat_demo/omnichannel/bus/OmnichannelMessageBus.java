@@ -37,6 +37,12 @@ public class OmnichannelMessageBus {
         Conversation conversation = conversationStateService.getOrCreateActiveConversation(user);
         log.debug("Inbound message will use conversation {}", conversation.getId());
         
+        // Lưu channel ID vào conversation nếu có (dùng cho Discord)
+        if (unifiedMessage.getChannelId() != null && !unifiedMessage.getChannelId().isBlank()) {
+            conversation.setChannelId(unifiedMessage.getChannelId());
+            log.debug("Set channel ID {} for conversation {}", unifiedMessage.getChannelId(), conversation.getId());
+        }
+        
         // Tạo message entity
         Message message = new Message();
         message.setUser(user);

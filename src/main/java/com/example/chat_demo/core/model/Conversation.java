@@ -39,6 +39,9 @@ public class Conversation {
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
     
+    @Column(name = "channel_id")
+    private String channelId;  // Dùng cho Discord: lưu channel ID để reply
+    
     @PrePersist
     protected void onCreate() {
         if (startedAt == null) {

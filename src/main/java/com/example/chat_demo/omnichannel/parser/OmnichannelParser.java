@@ -31,6 +31,8 @@ public class OmnichannelParser {
         return switch (channelType) {
             case TELEGRAM -> telegramParser.parse(rawData);
             case MESSENGER -> messengerParser.parse(rawData);
+            case DISCORD -> throw new UnsupportedOperationException("Discord uses Gateway (WebSocket), not webhook. Use DiscordGatewayService instead.");
+            default -> throw new IllegalArgumentException("Unsupported channel type: " + channelType);
         };
     }
 }

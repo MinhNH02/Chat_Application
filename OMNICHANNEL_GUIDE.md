@@ -224,3 +224,53 @@ Hoàn tất! Dự án hiện tập trung vào luồng Omnichannel cơ bản cho 
 PS C:\Users\minhf> $token = "8276716956:AAGEGKI3nFVxhvvEyyaEl2D4vU5NBYGGqlI"
 PS C:\Users\minhf> $webhook = "https://exhaustingly-nonshrinkable-roosevelt.ngrok-free.dev/webhook/telegram"
 PS C:\Users\minhf> Invoke-WebRequest -Uri "https://api.telegram.org/bot$token/setWebhook?url=$webhook" -Method Post
+
+---
+
+## 11. Kiến trúc backend (Model → Controller)
+
+1. `core.model.User | Conversation | Message` nắm toàn bộ dữ liệu (user info, hội thoại, tin nhắn).
+2. `core.repository.*` (ConversationRepository, MessageRepository, UserRepository) thao tác PostgreSQL.
+3. `omnichannel.bus.OmnichannelMessageBus` lưu inbound/outbound, cập nhật `Conversation.lastMessageAt` và `channelId`.
+4. `omnichannel.router.OmnichannelRouter` nhận `UnifiedMessage`, tìm/khởi tạo `User` + `Conversation`, gọi MessageBus, xử lý auto-reply.
+5. `api.controller.ChatApiController` cung cấp REST cho staff, trả DTO chuẩn cho frontend:
+   - `GET /api/conversations` → `List<ConversationDto>`
+   - `GET /api/conversations/{id}` → `ConversationDetailDto` (gồm `conversation` + `MessageListDto`)
+   - `POST /api/conversations/{id}/messages` → `MessageDto` cho outbound mới tạo
+6. `webhook.controller.*` là điểm vào inbound từng kênh (`WebhookController` cho Telegram/Messenger, `DiscordTestController` cho test Discord,...).
+
+---
+
+## 12. Luồng Telegram end-to-end
+
+1. User chat với bot → Telegram gửi webhook tới `/webhook/telegram`.
+2. `WebhookController` parse payload thông qua `TelegramParser` thành `UnifiedMessage`.
+3. `OmnichannelRouter` tìm/khởi tạo `User` + `Conversation`, lưu inbound qua `OmnichannelMessageBus` → `MessageRepository`.
+4. Nếu là lần đầu, router có thể gửi welcome/auto-reply theo cấu hình.
+5. Staff UI gọi `GET /api/conversations` nhận `ConversationDto` (trường chính: `id`, `userName`, `channelType`, `lastMessagePreview`, `lastMessageAt`, `unreadCount`...), rồi `GET /api/conversations/{id}` để lấy `ConversationDetailDto` (bao gồm block `conversation` + `messages` với `MessageDto` và metadata `MessageListDto`).
+6. Staff trả lời bằng `POST /api/conversations/{id}/messages`: controller chọn `TelegramConnector`, dùng `user.platformUserId` gọi Telegram Bot API. API trả về `MessageDto` của outbound.
+7. `OmnichannelMessageBus.saveOutboundMessage` lưu bản ghi outbound để đồng bộ UI và cập nhật `ConversationDto` khi frontend reload.
+
+API liên quan:
+- `/webhook/telegram`
+- `/test/telegram/setup-webhook`, `/test/telegram/webhook-info`, `/test/telegram/send-message`
+- `/api/conversations`, `/api/conversations/{id}`
+
+---
+
+## 13. Luồng Discord end-to-end
+
+1. `DiscordGatewayService` đăng nhập JDA với intents `GUILD_MESSAGES`, `MESSAGE_CONTENT`, `DIRECT_MESSAGES`.
+2. `onMessageReceived` chuyển event thành `UnifiedMessage` (gồm `platformUserId`, `channelId`, `content`) rồi chuyển cho `OmnichannelRouter`.
+3. `Conversation.channelId` được lưu để staff reply đúng channel công khai.
+4. Staff vẫn dùng chung API `GET /api/conversations`, `GET /api/conversations/{id}` để xem dữ liệu (`ConversationDto`, `ConversationDetailDto` như Telegram).
+5. Khi staff gửi `POST /api/conversations/{id}/messages`, controller kiểm tra `channelType=DISCORD` và dùng `conversation.channelId` gọi `DiscordConnector` → REST `POST /channels/{channelId}/messages` với header `Bot <token>`. Kết quả trả về `MessageDto`.
+6. Các API kiểm thử:
+   - `POST /test/discord/send-message`
+   - `GET /test/discord/channel-info`
+   - `POST /test/discord/create-invite`
+   - `GET /test/discord/channels`
+
+Ghi chú:
+- Luồng text dùng channel support có sẵn, không tạo thread/channel động.
+- Voice call: chỉ gửi invite tới voice channel native Discord, không đi qua Omnichannel.

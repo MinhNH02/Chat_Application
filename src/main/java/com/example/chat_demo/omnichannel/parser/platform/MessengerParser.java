@@ -2,6 +2,7 @@ package com.example.chat_demo.omnichannel.parser.platform;
 
 import com.example.chat_demo.common.ChannelType;
 import com.example.chat_demo.omnichannel.model.UnifiedMessage;
+import com.example.chat_demo.omnichannel.service.MessengerUserProfileService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,7 @@ import java.util.Map;
 public class MessengerParser {
 
     private final ObjectMapper objectMapper;
+    private final MessengerUserProfileService userProfileService;
 
     public UnifiedMessage parse(Object rawData) {
         try {
@@ -59,13 +61,43 @@ public class MessengerParser {
                     ? LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.systemDefault())
                     : LocalDateTime.now();
 
+            // Lấy user profile từ Graph API (firstName, lastName)
+            MessengerUserProfileService.UserProfile profile = userProfileService.getUserProfile(psid);
+            String firstName = profile != null ? profile.firstName() : null;
+            String lastName = profile != null ? profile.lastName() : null;
+
+            // Xử lý message type và content
+            String messageType = "text";
+            String content = text;
+            
+            // Kiểm tra nếu có attachments (images, files, etc.)
+            Map<String, Object> attachments = (Map<String, Object>) message.get("attachments");
+            if (attachments != null && !attachments.isEmpty()) {
+                List<Map<String, Object>> attachmentList = (List<Map<String, Object>>) attachments.get("data");
+                if (attachmentList != null && !attachmentList.isEmpty()) {
+                    Map<String, Object> firstAttachment = attachmentList.get(0);
+                    String attachmentType = getStringValue(firstAttachment, "type");
+                    messageType = attachmentType != null ? attachmentType : "attachment";
+                    
+                    if (content == null || content.isEmpty()) {
+                        content = "[Message with " + messageType + "]";
+                    }
+                }
+            }
+            
+            if (content == null || content.isEmpty()) {
+                content = "[Unsupported message type]";
+            }
+
             return UnifiedMessage.builder()
                     .channelType(ChannelType.MESSENGER)
                     .platformUserId(psid)
                     .platformMessageId(messageId)
-                    .content(text != null ? text : "[Unsupported message type]")
-                    .messageType("text")
+                    .content(content)
+                    .messageType(messageType)
                     .timestamp(receivedAt)
+                    .firstName(firstName)
+                    .lastName(lastName)
                     .rawData(rawData)
                     .build();
 

@@ -28,6 +28,9 @@ public class UnifiedMessage {
     private String lastName;
     private String phoneNumber;
     
+    // Platform-specific metadata (e.g., Discord channel ID)
+    private String channelId;  // Dùng cho Discord: channel ID để reply
+    
     // Raw data từ platform (để debug)
     private Object rawData;
 }
