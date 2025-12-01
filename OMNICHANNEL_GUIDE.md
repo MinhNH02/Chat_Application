@@ -118,14 +118,14 @@ Invoke-WebRequest -Uri "https://api.telegram.org/bot$token/setWebhook?url=$webho
 
 ## 6. Luồng test end-to-end
 
-### 6.1. User → Webhook
+### 6.1. User → Webhook (kèm welcome `!Hi`)
 1. Mở Telegram, tìm bot (username đã tạo).
-2. Gửi tin nhắn “Hello”.
+2. Gửi “!Hi” hoặc bất kỳ tin nhắn đầu tiên.
 3. Quan sát log:
    - `Routing message from platform TELEGRAM user ...`
-   - `Registered new user ...` (nếu lần đầu)
-   - `Saved inbound message ...`
-   - `Welcome message dispatched ...`
+   - `User ... is new, sending welcome message`
+   - `Welcome message dispatched ...` (nội dung cấu hình trong `omnichannel.auto-reply.welcome-message`)
+4. Sau welcome, conversation được mở và các tin tiếp theo tiếp tục lưu realtime.
 
 ### 6.2. Kiểm tra DB (PostgreSQL)
 1. Kết nối PostgreSQL (psql, pgAdmin, DBeaver) tới DB `chatdemo` với user `postgres`.
@@ -137,18 +137,19 @@ Invoke-WebRequest -Uri "https://api.telegram.org/bot$token/setWebhook?url=$webho
    ```
 3. Bạn sẽ thấy user/tin nhắn đã được lưu (không còn dùng H2 console).
 
-### 6.3. Staff Dashboard APIs (Swagger UI)
+### 6.3. Staff Dashboard APIs (Swagger UI + WebSocket)
 Mở `http://localhost:8081/swagger-ui.html` → các nhóm:
 
 - **Webhook API**: `/webhook/telegram`, `/webhook/messenger`, `/webhook/zalo`.
 - **Telegram Test API**: các endpoint helper (webhook-info, setup, delete, send-message).
 - **Staff Chat API**:
   - `GET /api/conversations` – danh sách hội thoại.
-  - `GET /api/conversations/{id}` – chi tiết hội thoại.
-  - `GET /api/conversations/{id}/messages` – lịch sử tin nhắn (đặt `page`, `size`).
+  - `GET /api/conversations/{id}` – chi tiết hội thoại + 50 message gần nhất (cursor-based).
   - `POST /api/conversations/{id}/messages` – staff trả lời người dùng.
 
-### 6.4. Staff trả lời người dùng
+WebSocket endpoint: `ws://<host>:8081/ws` (SockJS hỗ trợ fallback). Client subscribe theo topic `/topic/conversations/{conversationId}` để nhận `MessageDto` realtime mỗi khi inbound/outbound mới được lưu.
+
+### 6.4. Staff trả lời người dùng + realtime
 1. Từ `GET /api/conversations`, chọn `id`.
 2. Gọi `POST /api/conversations/{id}/messages` với JSON:
    ```json
@@ -160,6 +161,19 @@ Mở `http://localhost:8081/swagger-ui.html` → các nhóm:
    - `Sent outbound message ...`
    - `TelegramConnector` log URL gửi.
 4. Người dùng thấy tin nhắn trả lời trực tiếp trên Telegram.
+5. Nếu frontend đã subscribe `/topic/conversations/{id}`, tin outbound xuất hiện ngay lập tức mà không cần reload.
+
+### 6.5. Tự kiểm tra WebSocket
+1. Dùng Postman WebSocket Client hoặc `wscat`:
+   ```bash
+   wscat -c ws://localhost:8081/ws/websocket
+   ```
+   (SockJS dùng frame STOMP, dễ nhất là dùng client STOMP chính thức).
+2. Dùng thư viện STOMP (vd: `@stomp/stompjs`) subscribe:
+   ```
+   client.subscribe('/topic/conversations/1', (msg) => console.log(msg.body));
+   ```
+3. Gửi tin từ Telegram hoặc Staff để thấy payload realtime (`MessageDto` JSON).
 
 ---
 
@@ -241,15 +255,21 @@ PS C:\Users\minhf> Invoke-WebRequest -Uri "https://api.telegram.org/bot$token/se
 
 ---
 
-## 12. Luồng Telegram end-to-end
+## 12. Luồng Telegram end-to-end (có welcome + WebSocket)
 
-1. User chat với bot → Telegram gửi webhook tới `/webhook/telegram`.
-2. `WebhookController` parse payload thông qua `TelegramParser` thành `UnifiedMessage`.
-3. `OmnichannelRouter` tìm/khởi tạo `User` + `Conversation`, lưu inbound qua `OmnichannelMessageBus` → `MessageRepository`.
-4. Nếu là lần đầu, router có thể gửi welcome/auto-reply theo cấu hình.
-5. Staff UI gọi `GET /api/conversations` nhận `ConversationDto` (trường chính: `id`, `userName`, `channelType`, `lastMessagePreview`, `lastMessageAt`, `unreadCount`...), rồi `GET /api/conversations/{id}` để lấy `ConversationDetailDto` (bao gồm block `conversation` + `messages` với `MessageDto` và metadata `MessageListDto`).
-6. Staff trả lời bằng `POST /api/conversations/{id}/messages`: controller chọn `TelegramConnector`, dùng `user.platformUserId` gọi Telegram Bot API. API trả về `MessageDto` của outbound.
-7. `OmnichannelMessageBus.saveOutboundMessage` lưu bản ghi outbound để đồng bộ UI và cập nhật `ConversationDto` khi frontend reload.
+1. User gửi tin đầu tiên (khuyến nghị nhắc user nhấn `!Hi`). Telegram push webhook `/webhook/telegram`.
+2. `WebhookController` dùng `TelegramParser` chuyển payload thành `UnifiedMessage` (chứa `platformUserId`, `content`, `timestamp`…).
+3. `OmnichannelRouter`:
+   - Kiểm tra user đã tồn tại (để biết có gửi welcome).
+   - Đăng ký user mới nếu cần (UserRegistryService).
+   - Lấy conversation active hoặc tạo mới (`ConversationStateService`).
+4. `OmnichannelMessageBus.saveInboundMessage` lưu message vào PostgreSQL và broadcast qua `RealtimeMessagePublisher` → topic `/topic/conversations/{conversationId}`.
+5. Nếu user mới và `omnichannel.auto-reply.enabled=true`, Router gửi welcome message (“Chào bạn! Hãy nhấn !Hi...” hoặc nội dung tùy chỉnh). Welcome cũng được lưu + broadcast như một outbound message.
+6. Staff UI:
+   - `GET /api/conversations` → `ConversationDto`.
+   - `GET /api/conversations/{id}` → `ConversationDetailDto` (messages + metadata infinite scroll).
+   - Đồng thời subscribe WebSocket để nhận tin realtime mà không cần refresh.
+7. Khi staff gửi `POST /api/conversations/{id}/messages`, controller dùng `TelegramConnector -> Bot API` gửi tin, lưu outbound (`saveOutboundMessage`) và broadcast WebSocket để frontend cập nhật ngay.
 
 API liên quan:
 - `/webhook/telegram`

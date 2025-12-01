@@ -14,5 +14,11 @@ public class MessageDto {
     private LocalDateTime sentAt;
     private Long userId;
     private String userName;
+    
+    // Attachment info
+    private String attachmentUrl;  // MinIO object key hoặc pre-signed URL
+    private String attachmentType;
+    private String attachmentFilename;
+    private Long attachmentSize;
 }
 

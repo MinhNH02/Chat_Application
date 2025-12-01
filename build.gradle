@@ -21,6 +21,12 @@ repositories {
 dependencies {
 	// Spring Boot Web (cho Webhook và REST API)
 	implementation 'org.springframework.boot:spring-boot-starter-web'
+
+	// Actuator cho health/info endpoint
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+	// WebSocket/STOMP cho realtime notifications
+	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 	
 	// OpenAPI/Swagger UI (tương thích với Spring Boot 3.4.0)
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.7.0'
@@ -36,6 +42,9 @@ dependencies {
 	
 	// Discord (JDA)
 	implementation 'net.dv8tion:JDA:5.0.0-beta.13'
+	
+	// MinIO for object storage
+	implementation 'io.minio:minio:8.5.10'
 	
 	// Lombok (giảm boilerplate code)
 	compileOnly 'org.projectlombok:lombok'

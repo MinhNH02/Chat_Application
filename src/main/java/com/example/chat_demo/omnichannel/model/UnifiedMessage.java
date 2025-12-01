@@ -31,6 +31,12 @@ public class UnifiedMessage {
     // Platform-specific metadata (e.g., Discord channel ID)
     private String channelId;  // Dùng cho Discord: channel ID để reply
     
+    // Attachment info (từ platform, sẽ upload lên MinIO)
+    private String attachmentUrl;  // URL từ platform để download file
+    private String attachmentType;  // image, video, document, etc.
+    private String attachmentFilename;
+    private Long attachmentSize;
+    
     // Raw data từ platform (để debug)
     private Object rawData;
 }

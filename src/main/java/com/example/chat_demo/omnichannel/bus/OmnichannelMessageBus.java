@@ -1,12 +1,14 @@
 package com.example.chat_demo.omnichannel.bus;
 
+import com.example.chat_demo.common.ChannelType;
 import com.example.chat_demo.core.model.Conversation;
 import com.example.chat_demo.core.model.Message;
 import com.example.chat_demo.core.model.User;
-import com.example.chat_demo.core.repository.ConversationRepository;
 import com.example.chat_demo.core.repository.MessageRepository;
 import com.example.chat_demo.core.service.ConversationStateService;
 import com.example.chat_demo.omnichannel.model.UnifiedMessage;
+import com.example.chat_demo.omnichannel.realtime.RealtimeMessagePublisher;
+import com.example.chat_demo.omnichannel.service.TelegramFileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,8 @@ public class OmnichannelMessageBus {
     
     private final MessageRepository messageRepository;
     private final ConversationStateService conversationStateService;
+    private final RealtimeMessagePublisher realtimeMessagePublisher;
+    private final TelegramFileService telegramFileService;
     
     /**
      * Lưu inbound message vào DB
@@ -54,8 +58,42 @@ public class OmnichannelMessageBus {
         message.setDirection(Message.MessageDirection.INBOUND);
         message.setStatus(Message.MessageStatus.DELIVERED);
         
-        // Lưu message
-        Message savedMessage = messageRepository.save(message);
+        // Xử lý attachment nếu có (download từ platform và upload lên MinIO)
+        Message savedMessage;
+        if (unifiedMessage.getAttachmentUrl() != null && 
+            !unifiedMessage.getAttachmentUrl().isEmpty()) {
+            
+            // Lưu message tạm để có ID
+            savedMessage = messageRepository.save(message);
+            
+            // Download và upload file lên MinIO
+            String minioObjectKey = null;
+            if (unifiedMessage.getChannelType() == ChannelType.TELEGRAM) {
+                minioObjectKey = telegramFileService.downloadAndUpload(
+                    unifiedMessage.getAttachmentUrl(), // Telegram file_id
+                    conversation.getId(),
+                    savedMessage.getId(),
+                    unifiedMessage.getAttachmentFilename(),
+                    getContentTypeFromAttachmentType(unifiedMessage.getAttachmentType())
+                );
+            }
+            
+            // Cập nhật message với MinIO object key
+            if (minioObjectKey != null) {
+                savedMessage.setAttachmentUrl(minioObjectKey);
+                savedMessage.setAttachmentType(unifiedMessage.getAttachmentType());
+                savedMessage.setAttachmentFilename(unifiedMessage.getAttachmentFilename());
+                savedMessage.setAttachmentSize(unifiedMessage.getAttachmentSize());
+                log.info("Attachment uploaded to MinIO: {}", minioObjectKey);
+                // Save lại để cập nhật attachment info
+                savedMessage = messageRepository.save(savedMessage);
+            } else {
+                log.warn("Failed to upload attachment to MinIO for message {}", savedMessage.getId());
+            }
+        } else {
+            // Không có attachment, lưu message bình thường
+            savedMessage = messageRepository.save(message);
+        }
         log.info("Inbound message saved with id {}", savedMessage.getId());
         
         // Cập nhật conversation
@@ -64,6 +102,8 @@ public class OmnichannelMessageBus {
         
         log.debug("Saved inbound message: {} for user: {}", 
             savedMessage.getId(), user.getPlatformUserId());
+
+        realtimeMessagePublisher.publish(savedMessage);
         
         return savedMessage;
     }
@@ -88,8 +128,25 @@ public class OmnichannelMessageBus {
         // Cập nhật conversation
         conversation.setLastMessageAt(LocalDateTime.now());
         conversationStateService.updateConversation(conversation);
+        realtimeMessagePublisher.publish(savedMessage);
         
         return savedMessage;
+    }
+    
+    /**
+     * Map attachment type sang content type
+     */
+    private String getContentTypeFromAttachmentType(String attachmentType) {
+        if (attachmentType == null) {
+            return "application/octet-stream";
+        }
+        return switch (attachmentType.toLowerCase()) {
+            case "image" -> "image/jpeg";
+            case "video" -> "video/mp4";
+            case "audio" -> "audio/mpeg";
+            case "document" -> "application/pdf";
+            default -> "application/octet-stream";
+        };
     }
 }
 

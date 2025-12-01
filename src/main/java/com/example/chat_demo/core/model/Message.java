@@ -45,6 +45,19 @@ public class Message {
     @Enumerated(EnumType.STRING)
     private MessageStatus status;
     
+    // Attachment fields (MinIO)
+    @Column(name = "attachment_url")
+    private String attachmentUrl;  // MinIO object key: "conversations/123/messages/456/file.jpg"
+    
+    @Column(name = "attachment_type")
+    private String attachmentType;  // image, video, document, etc.
+    
+    @Column(name = "attachment_filename")
+    private String attachmentFilename;
+    
+    @Column(name = "attachment_size")
+    private Long attachmentSize;
+    
     public enum MessageDirection {
         INBOUND,    // Từ user đến system
         OUTBOUND    // Từ system đến user

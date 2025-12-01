@@ -1,6 +1,7 @@
 package com.example.chat_demo.api.controller;
 
 import com.example.chat_demo.api.dto.*;
+import com.example.chat_demo.api.mapper.MessageMapper;
 import com.example.chat_demo.core.model.Conversation;
 import com.example.chat_demo.core.model.Message;
 import com.example.chat_demo.core.model.User;
@@ -9,6 +10,9 @@ import com.example.chat_demo.core.repository.MessageRepository;
 import com.example.chat_demo.omnichannel.bus.OmnichannelMessageBus;
 import com.example.chat_demo.omnichannel.connector.ConnectorFactory;
 import com.example.chat_demo.omnichannel.connector.PlatformConnector;
+import com.example.chat_demo.omnichannel.realtime.RealtimeMessagePublisher;
+import com.example.chat_demo.omnichannel.connector.TelegramConnector;
+import com.example.chat_demo.storage.MediaStorageService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -20,12 +24,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -35,7 +42,7 @@ import java.util.stream.Collectors;
 @RestController
 @Tag(name = "Staff Chat API", description = "Các API phục vụ Staff Dashboard để xem và gửi tin nhắn.")
 @RequestMapping("/api")
-@CrossOrigin(origins = "http://localhost:3000")
+@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001"})
 @RequiredArgsConstructor
 public class ChatApiController {
     
@@ -43,6 +50,9 @@ public class ChatApiController {
     private final MessageRepository messageRepository;
     private final OmnichannelMessageBus messageBus;
     private final ConnectorFactory connectorFactory;
+    private final MessageMapper messageMapper;
+    private final RealtimeMessagePublisher realtimeMessagePublisher;
+    private final MediaStorageService mediaStorageService;
     
     /**
      * Lấy danh sách tất cả conversations
@@ -130,29 +140,188 @@ public class ChatApiController {
             recipientId = user.getPlatformUserId();
         }
         
-        // Gửi message qua platform
-        try {
-            connector.sendMessage(recipientId, request.getContent());
-        } catch (Exception e) {
-            log.error("Failed to send message via connector", e);
-            throw new RuntimeException("Failed to send message", e);
-        }
-        
-        // Lưu message vào DB
+        // Lưu message vào DB với status PENDING (trước khi gửi)
         Message message = messageBus.saveOutboundMessage(
             request.getContent(), 
             user, 
             conversation
         );
         
-        // Update message status
-        message.setStatus(Message.MessageStatus.DELIVERED);
-        message.setSentAt(LocalDateTime.now());
-        messageRepository.save(message);
-        log.info("Sent outbound message {} to user {}", message.getId(), user.getId());
-        log.info("[API] POST /api/conversations/{}/messages response messageId={}", id, message.getId());
+        // Gửi message qua platform và cập nhật status
+        try {
+            connector.sendMessage(recipientId, request.getContent());
+            
+            // Thành công: update status = DELIVERED
+            message.setStatus(Message.MessageStatus.DELIVERED);
+            message.setSentAt(LocalDateTime.now());
+            messageRepository.save(message);
+            
+            // Publish lại để frontend nhận update
+            realtimeMessagePublisher.publish(message);
+            
+            log.info("Sent outbound message {} to user {} (status: DELIVERED)", message.getId(), user.getId());
+            log.info("[API] POST /api/conversations/{}/messages response messageId={}", id, message.getId());
+            
+            return ResponseEntity.ok(messageMapper.toDto(message));
+            
+        } catch (Exception e) {
+            log.error("Failed to send message via connector for message {}", message.getId(), e);
+            
+            // Thất bại: update status = FAILED
+            message.setStatus(Message.MessageStatus.FAILED);
+            messageRepository.save(message);
+            
+            // Publish lại để frontend nhận update (với status FAILED)
+            realtimeMessagePublisher.publish(message);
+            
+            log.warn("Message {} failed to send, status set to FAILED", message.getId());
+            
+            // Trả về message với status FAILED (frontend sẽ hiển thị icon ✗)
+            return ResponseEntity.ok(messageMapper.toDto(message));
+        }
+    }
+    
+    /**
+     * Gửi file từ Staff
+     */
+    @Operation(summary = "Gửi file từ staff", description = "Upload file và gửi đến người dùng cuối qua platform tương ứng.")
+    @ApiResponse(responseCode = "200", description = "File đã gửi",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = MessageDto.class)))
+    @PostMapping(
+            value = "/conversations/{id}/messages/file",
+            consumes = { MediaType.MULTIPART_FORM_DATA_VALUE }
+    )
+    public ResponseEntity<MessageDto> sendFile(
+            @PathVariable Long id,
+            @RequestPart("file") MultipartFile file,
+            @RequestPart(value = "content", required = false) String content) {
+        log.info("[API] POST /api/conversations/{}/messages/file filename={}, size={}", 
+                id, file.getOriginalFilename(), file.getSize());
         
-        return ResponseEntity.ok(toMessageDto(message));
+        Conversation conversation = conversationRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Conversation not found"));
+        
+        User user = conversation.getUser();
+        
+        // Lưu message vào DB với status PENDING (trước khi upload và gửi)
+        String messageContent;
+        if (content != null) {
+            String trimmed = content.trim();
+            if (!trimmed.isEmpty() && !"string".equalsIgnoreCase(trimmed)) {
+                messageContent = trimmed;
+            } else {
+                messageContent = String.format("[File: %s]", file.getOriginalFilename());
+            }
+        } else {
+            messageContent = String.format("[File: %s]", file.getOriginalFilename());
+        }
+        
+        Message message = messageBus.saveOutboundMessage(
+            messageContent, 
+            user, 
+            conversation
+        );
+        
+        try {
+            // Upload file lên MinIO
+            String objectKey = mediaStorageService.uploadFile(
+                file.getInputStream(),
+                file.getOriginalFilename(),
+                file.getContentType() != null ? file.getContentType() : "application/octet-stream",
+                conversation.getId(),
+                message.getId()
+            );
+            
+            // Cập nhật message với attachment info
+            message.setAttachmentUrl(objectKey);
+            message.setAttachmentType(getAttachmentTypeFromContentType(file.getContentType()));
+            message.setAttachmentFilename(file.getOriginalFilename());
+            message.setAttachmentSize(file.getSize());
+            message.setMessageType(getAttachmentTypeFromContentType(file.getContentType()));
+            messageRepository.save(message);
+            
+            // Gửi file qua platform
+            PlatformConnector connector = connectorFactory.getConnector(user.getChannelType());
+            String recipientId;
+            if (user.getChannelType() == com.example.chat_demo.common.ChannelType.DISCORD) {
+                recipientId = conversation.getChannelId();
+                if (recipientId == null || recipientId.isBlank()) {
+                    throw new RuntimeException("Discord conversation missing channel ID");
+                }
+            } else {
+                recipientId = user.getPlatformUserId();
+            }
+
+            // Nếu là Telegram: dùng API media với bytes trực tiếp (không dựa vào URL nội bộ 127.0.0.1)
+            if (connector instanceof TelegramConnector) {
+                TelegramConnector telegramConnector = (TelegramConnector) connector;
+                byte[] bytes = file.getBytes();
+                String mimeType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";
+                String filename = file.getOriginalFilename();
+
+                String type = message.getAttachmentType();
+                String lowerName = filename != null ? filename.toLowerCase() : "";
+
+                if ("image".equals(type) && !lowerName.endsWith(".gif")) {
+                    telegramConnector.sendPhotoBytes(recipientId, bytes, filename, mimeType, messageContent);
+                } else if ("image".equals(type) && lowerName.endsWith(".gif")) {
+                    telegramConnector.sendAnimationBytes(recipientId, bytes, filename, mimeType, messageContent);
+                } else if ("video".equals(type)) {
+                    telegramConnector.sendVideoBytes(recipientId, bytes, filename, mimeType, messageContent);
+                } else {
+                    telegramConnector.sendDocumentBytes(recipientId, bytes, filename, mimeType, messageContent);
+                }
+            } else {
+                // Các kênh khác: fallback gửi text
+                connector.sendMessage(recipientId, messageContent);
+            }
+            
+            // Thành công: update status = DELIVERED
+            message.setStatus(Message.MessageStatus.DELIVERED);
+            message.setSentAt(LocalDateTime.now());
+            messageRepository.save(message);
+            
+            // Publish lại để frontend nhận update
+            realtimeMessagePublisher.publish(message);
+            
+            log.info("Sent outbound file message {} to user {} (status: DELIVERED)", message.getId(), user.getId());
+            return ResponseEntity.ok(messageMapper.toDto(message));
+            
+        } catch (Exception e) {
+            log.error("Failed to send file via connector for message {}", message.getId(), e);
+            
+            // Thất bại: update status = FAILED
+            message.setStatus(Message.MessageStatus.FAILED);
+            messageRepository.save(message);
+            
+            // Publish lại để frontend nhận update
+            realtimeMessagePublisher.publish(message);
+            
+            return ResponseEntity.status(500).body(messageMapper.toDto(message));
+        }
+    }
+    
+    /**
+     * Lấy pre-signed URL để download/view file
+     */
+    @Operation(summary = "Lấy URL để download file", description = "Tạo pre-signed URL để frontend có thể download/view file từ MinIO.")
+    @GetMapping("/messages/{messageId}/file-url")
+    public ResponseEntity<Map<String, String>> getFileUrl(@PathVariable Long messageId) {
+        Message message = messageRepository.findById(messageId)
+            .orElseThrow(() -> new RuntimeException("Message not found"));
+        
+        if (message.getAttachmentUrl() == null || message.getAttachmentUrl().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Message has no attachment"));
+        }
+        
+        // Tạo pre-signed URL (expiry: 1 hour)
+        String presignedUrl = mediaStorageService.getPresignedUrl(message.getAttachmentUrl(), 3600);
+        
+        return ResponseEntity.ok(Map.of(
+            "url", presignedUrl,
+            "filename", message.getAttachmentFilename() != null ? message.getAttachmentFilename() : "file",
+            "type", message.getAttachmentType() != null ? message.getAttachmentType() : "document"
+        ));
     }
     
     // Helper methods
@@ -185,7 +354,7 @@ public class ChatApiController {
         
         // Convert to DTO
         List<MessageDto> messageDtos = messages.stream()
-            .map(this::toMessageDto)
+            .map(messageMapper::toDto)
             .collect(Collectors.toList());
         
         // Build response
@@ -261,34 +430,23 @@ public class ChatApiController {
         return dto;
     }
     
-    private MessageDto toMessageDto(Message msg) {
-        MessageDto dto = new MessageDto();
-        dto.setId(msg.getId());
-        dto.setContent(msg.getContent());
-        dto.setMessageType(msg.getMessageType());
-        
-        // Xử lý null cho direction và status
-        if (msg.getDirection() != null) {
-        dto.setDirection(msg.getDirection().name());
+    /**
+     * Map content type sang attachment type
+     */
+    private String getAttachmentTypeFromContentType(String contentType) {
+        if (contentType == null) {
+            return "document";
         }
-        if (msg.getStatus() != null) {
-        dto.setStatus(msg.getStatus().name());
+        if (contentType.startsWith("image/")) {
+            return "image";
+        } else if (contentType.startsWith("video/")) {
+            return "video";
+        } else if (contentType.startsWith("audio/")) {
+            return "audio";
+        } else {
+            return "document";
         }
-        
-        dto.setReceivedAt(msg.getReceivedAt());
-        dto.setSentAt(msg.getSentAt());
-        
-        // Xử lý null cho user
-        if (msg.getUser() != null) {
-        dto.setUserId(msg.getUser().getId());
-            dto.setUserName(
-                msg.getUser().getFirstName() != null ? 
-                    msg.getUser().getFirstName() : 
-                    "Unknown"
-            );
-        }
-        
-        return dto;
     }
+    
 }
 
