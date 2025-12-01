@@ -181,124 +181,123 @@ public class ChatApiController {
         }
     }
     
+
     /**
-     * Gửi file từ Staff
+     * Gửi nhiều file từ Staff trong một request
      */
-    @Operation(summary = "Gửi file từ staff", description = "Upload file và gửi đến người dùng cuối qua platform tương ứng.")
-    @ApiResponse(responseCode = "200", description = "File đã gửi",
+    @Operation(summary = "Gửi nhiều file từ staff", description = "Upload nhiều file và gửi đến người dùng cuối qua platform tương ứng.")
+    @ApiResponse(responseCode = "200", description = "Danh sách file đã gửi",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = MessageDto.class)))
     @PostMapping(
-            value = "/conversations/{id}/messages/file",
+            value = "/conversations/{id}/messages/files",
             consumes = { MediaType.MULTIPART_FORM_DATA_VALUE }
     )
-    public ResponseEntity<MessageDto> sendFile(
+    public ResponseEntity<List<MessageDto>> sendMultipleFiles(
             @PathVariable Long id,
-            @RequestPart("file") MultipartFile file,
-            @RequestPart(value = "content", required = false) String content) {
-        log.info("[API] POST /api/conversations/{}/messages/file filename={}, size={}", 
-                id, file.getOriginalFilename(), file.getSize());
-        
+            @RequestPart("files") List<MultipartFile> files,
+            @RequestPart(value = "content", required = false) String content
+    ) {
+        log.info("[API] POST /api/conversations/{}/messages/files totalFiles={}", id,
+                files != null ? files.size() : 0);
+
+        if (files == null || files.isEmpty()) {
+            return ResponseEntity.badRequest().body(Collections.emptyList());
+        }
+
         Conversation conversation = conversationRepository.findById(id)
-            .orElseThrow(() -> new RuntimeException("Conversation not found"));
-        
+                .orElseThrow(() -> new RuntimeException("Conversation not found"));
         User user = conversation.getUser();
-        
-        // Lưu message vào DB với status PENDING (trước khi upload và gửi)
-        String messageContent;
-        if (content != null) {
-            String trimmed = content.trim();
-            if (!trimmed.isEmpty() && !"string".equalsIgnoreCase(trimmed)) {
-                messageContent = trimmed;
+
+        PlatformConnector connector = connectorFactory.getConnector(user.getChannelType());
+        String recipientId;
+        if (user.getChannelType() == com.example.chat_demo.common.ChannelType.DISCORD) {
+            recipientId = conversation.getChannelId();
+            if (recipientId == null || recipientId.isBlank()) {
+                throw new RuntimeException("Discord conversation missing channel ID");
+            }
+        } else {
+            recipientId = user.getPlatformUserId();
+        }
+
+        List<MessageDto> results = files.stream().map(file -> {
+            String messageContent;
+            if (content != null) {
+                String trimmed = content.trim();
+                if (!trimmed.isEmpty() && !"string".equalsIgnoreCase(trimmed)) {
+                    messageContent = trimmed;
+                } else {
+                    messageContent = String.format("[File: %s]", file.getOriginalFilename());
+                }
             } else {
                 messageContent = String.format("[File: %s]", file.getOriginalFilename());
             }
-        } else {
-            messageContent = String.format("[File: %s]", file.getOriginalFilename());
-        }
-        
-        Message message = messageBus.saveOutboundMessage(
-            messageContent, 
-            user, 
-            conversation
-        );
-        
-        try {
-            // Upload file lên MinIO
-            String objectKey = mediaStorageService.uploadFile(
-                file.getInputStream(),
-                file.getOriginalFilename(),
-                file.getContentType() != null ? file.getContentType() : "application/octet-stream",
-                conversation.getId(),
-                message.getId()
+
+            Message message = messageBus.saveOutboundMessage(
+                    messageContent,
+                    user,
+                    conversation
             );
-            
-            // Cập nhật message với attachment info
-            message.setAttachmentUrl(objectKey);
-            message.setAttachmentType(getAttachmentTypeFromContentType(file.getContentType()));
-            message.setAttachmentFilename(file.getOriginalFilename());
-            message.setAttachmentSize(file.getSize());
-            message.setMessageType(getAttachmentTypeFromContentType(file.getContentType()));
-            messageRepository.save(message);
-            
-            // Gửi file qua platform
-            PlatformConnector connector = connectorFactory.getConnector(user.getChannelType());
-            String recipientId;
-            if (user.getChannelType() == com.example.chat_demo.common.ChannelType.DISCORD) {
-                recipientId = conversation.getChannelId();
-                if (recipientId == null || recipientId.isBlank()) {
-                    throw new RuntimeException("Discord conversation missing channel ID");
-                }
-            } else {
-                recipientId = user.getPlatformUserId();
-            }
 
-            // Nếu là Telegram: dùng API media với bytes trực tiếp (không dựa vào URL nội bộ 127.0.0.1)
-            if (connector instanceof TelegramConnector) {
-                TelegramConnector telegramConnector = (TelegramConnector) connector;
-                byte[] bytes = file.getBytes();
-                String mimeType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";
-                String filename = file.getOriginalFilename();
+            try {
+                // Upload file lên MinIO
+                String objectKey = mediaStorageService.uploadFile(
+                        file.getInputStream(),
+                        file.getOriginalFilename(),
+                        file.getContentType() != null ? file.getContentType() : "application/octet-stream",
+                        conversation.getId(),
+                        message.getId()
+                );
 
-                String type = message.getAttachmentType();
-                String lowerName = filename != null ? filename.toLowerCase() : "";
+                // Cập nhật message với attachment info
+                message.setAttachmentUrl(objectKey);
+                message.setAttachmentType(getAttachmentTypeFromContentType(file.getContentType()));
+                message.setAttachmentFilename(file.getOriginalFilename());
+                message.setAttachmentSize(file.getSize());
+                message.setMessageType(getAttachmentTypeFromContentType(file.getContentType()));
+                messageRepository.save(message);
 
-                if ("image".equals(type) && !lowerName.endsWith(".gif")) {
-                    telegramConnector.sendPhotoBytes(recipientId, bytes, filename, mimeType, messageContent);
-                } else if ("image".equals(type) && lowerName.endsWith(".gif")) {
-                    telegramConnector.sendAnimationBytes(recipientId, bytes, filename, mimeType, messageContent);
-                } else if ("video".equals(type)) {
-                    telegramConnector.sendVideoBytes(recipientId, bytes, filename, mimeType, messageContent);
+                // Gửi file qua platform
+                if (connector instanceof TelegramConnector) {
+                    TelegramConnector telegramConnector = (TelegramConnector) connector;
+                    byte[] bytes = file.getBytes();
+                    String mimeType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";
+                    String filename = file.getOriginalFilename();
+
+                    String type = message.getAttachmentType();
+                    String lowerName = filename != null ? filename.toLowerCase() : "";
+
+                    if ("image".equals(type) && !lowerName.endsWith(".gif")) {
+                        telegramConnector.sendPhotoBytes(recipientId, bytes, filename, mimeType, messageContent);
+                    } else if ("image".equals(type) && lowerName.endsWith(".gif")) {
+                        telegramConnector.sendAnimationBytes(recipientId, bytes, filename, mimeType, messageContent);
+                    } else if ("video".equals(type)) {
+                        telegramConnector.sendVideoBytes(recipientId, bytes, filename, mimeType, messageContent);
+                    } else {
+                        telegramConnector.sendDocumentBytes(recipientId, bytes, filename, mimeType, messageContent);
+                    }
                 } else {
-                    telegramConnector.sendDocumentBytes(recipientId, bytes, filename, mimeType, messageContent);
+                    connector.sendMessage(recipientId, messageContent);
                 }
-            } else {
-                // Các kênh khác: fallback gửi text
-                connector.sendMessage(recipientId, messageContent);
+
+                message.setStatus(Message.MessageStatus.DELIVERED);
+                message.setSentAt(LocalDateTime.now());
+                messageRepository.save(message);
+                realtimeMessagePublisher.publish(message);
+
+                log.info("Sent outbound multi-file message {} to user {} (status: DELIVERED)",
+                        message.getId(), user.getId());
+                return messageMapper.toDto(message);
+
+            } catch (Exception e) {
+                log.error("Failed to send file (multi) via connector for message {}", message.getId(), e);
+                message.setStatus(Message.MessageStatus.FAILED);
+                messageRepository.save(message);
+                realtimeMessagePublisher.publish(message);
+                return messageMapper.toDto(message);
             }
-            
-            // Thành công: update status = DELIVERED
-            message.setStatus(Message.MessageStatus.DELIVERED);
-            message.setSentAt(LocalDateTime.now());
-            messageRepository.save(message);
-            
-            // Publish lại để frontend nhận update
-            realtimeMessagePublisher.publish(message);
-            
-            log.info("Sent outbound file message {} to user {} (status: DELIVERED)", message.getId(), user.getId());
-            return ResponseEntity.ok(messageMapper.toDto(message));
-            
-        } catch (Exception e) {
-            log.error("Failed to send file via connector for message {}", message.getId(), e);
-            
-            // Thất bại: update status = FAILED
-            message.setStatus(Message.MessageStatus.FAILED);
-            messageRepository.save(message);
-            
-            // Publish lại để frontend nhận update
-            realtimeMessagePublisher.publish(message);
-            
-            return ResponseEntity.status(500).body(messageMapper.toDto(message));
-        }
+        }).collect(Collectors.toList());
+
+        return ResponseEntity.ok(results);
     }
     
     /**
