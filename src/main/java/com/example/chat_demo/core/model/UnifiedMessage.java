@@ -1,4 +1,4 @@
-package com.example.chat_demo.omnichannel.model;
+package com.example.chat_demo.core.model;
 
 import com.example.chat_demo.common.ChannelType;
 import lombok.AllArgsConstructor;

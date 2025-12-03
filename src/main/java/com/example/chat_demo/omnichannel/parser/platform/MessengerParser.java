@@ -1,8 +1,8 @@
 package com.example.chat_demo.omnichannel.parser.platform;
 
 import com.example.chat_demo.common.ChannelType;
-import com.example.chat_demo.omnichannel.model.UnifiedMessage;
-import com.example.chat_demo.omnichannel.service.MessengerUserProfileService;
+import com.example.chat_demo.core.model.UnifiedMessage;
+import com.example.chat_demo.core.service.MessengerUserProfileService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

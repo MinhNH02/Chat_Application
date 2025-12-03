@@ -1,6 +1,6 @@
 package com.example.chat_demo.webhook.controller;
 
-import com.example.chat_demo.omnichannel.service.DiscordGatewayService;
+import com.example.chat_demo.core.service.DiscordGatewayService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;

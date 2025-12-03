@@ -1,4 +1,4 @@
-package com.example.chat_demo.omnichannel.realtime;
+package com.example.chat_demo.core.realtime;
 
 import com.example.chat_demo.api.dto.MessageDto;
 import com.example.chat_demo.api.mapper.MessageMapper;
@@ -6,13 +6,13 @@ import com.example.chat_demo.core.model.Message;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 
 /**
  * RealtimeMessagePublisher - phát message qua WebSocket/STOMP đến frontend
  */
 @Slf4j
-@Component
+@Service
 @RequiredArgsConstructor
 public class RealtimeMessagePublisher {
 

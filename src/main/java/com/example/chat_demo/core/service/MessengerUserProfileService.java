@@ -1,4 +1,4 @@
-package com.example.chat_demo.omnichannel.service;
+package com.example.chat_demo.core.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -63,6 +63,4 @@ public class MessengerUserProfileService {
     public record UserProfile(String firstName, String lastName) {
     }
 }
-
-
 

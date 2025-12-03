@@ -1,8 +1,8 @@
 package com.example.chat_demo.webhook.controller;
 
 import com.example.chat_demo.common.ChannelType;
+import com.example.chat_demo.core.router.OmnichannelRouter;
 import com.example.chat_demo.omnichannel.parser.OmnichannelParser;
-import com.example.chat_demo.omnichannel.router.OmnichannelRouter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;

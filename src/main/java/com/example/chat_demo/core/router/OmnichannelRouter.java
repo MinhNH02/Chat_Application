@@ -1,13 +1,13 @@
-package com.example.chat_demo.omnichannel.router;
+package com.example.chat_demo.core.router;
 
+import com.example.chat_demo.core.bus.OmnichannelMessageBus;
 import com.example.chat_demo.core.model.Conversation;
+import com.example.chat_demo.core.model.UnifiedMessage;
 import com.example.chat_demo.core.model.User;
 import com.example.chat_demo.core.service.ConversationStateService;
 import com.example.chat_demo.core.service.UserRegistryService;
-import com.example.chat_demo.omnichannel.bus.OmnichannelMessageBus;
 import com.example.chat_demo.omnichannel.connector.ConnectorFactory;
 import com.example.chat_demo.omnichannel.connector.PlatformConnector;
-import com.example.chat_demo.omnichannel.model.UnifiedMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

@@ -1,14 +1,14 @@
-package com.example.chat_demo.omnichannel.bus;
+package com.example.chat_demo.core.bus;
 
 import com.example.chat_demo.common.ChannelType;
 import com.example.chat_demo.core.model.Conversation;
 import com.example.chat_demo.core.model.Message;
+import com.example.chat_demo.core.model.UnifiedMessage;
 import com.example.chat_demo.core.model.User;
 import com.example.chat_demo.core.repository.MessageRepository;
+import com.example.chat_demo.core.realtime.RealtimeMessagePublisher;
 import com.example.chat_demo.core.service.ConversationStateService;
-import com.example.chat_demo.omnichannel.model.UnifiedMessage;
-import com.example.chat_demo.omnichannel.realtime.RealtimeMessagePublisher;
-import com.example.chat_demo.omnichannel.service.TelegramFileService;
+import com.example.chat_demo.core.service.TelegramFileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

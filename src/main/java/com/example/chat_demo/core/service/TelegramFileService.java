@@ -1,4 +1,4 @@
-package com.example.chat_demo.omnichannel.service;
+package com.example.chat_demo.core.service;
 
 import com.example.chat_demo.storage.MediaStorageService;
 import lombok.RequiredArgsConstructor;
@@ -10,7 +10,7 @@ import org.springframework.web.client.RestTemplate;
 import java.io.InputStream;
 
 /**
- * Service để download file từ Telegram API và upload lên MinIO
+ * TelegramFileService - Service để download file từ Telegram API và upload lên MinIO
  */
 @Slf4j
 @Service

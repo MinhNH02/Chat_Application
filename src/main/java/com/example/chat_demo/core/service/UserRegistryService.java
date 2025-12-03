@@ -1,8 +1,8 @@
 package com.example.chat_demo.core.service;
 
+import com.example.chat_demo.core.model.UnifiedMessage;
 import com.example.chat_demo.core.model.User;
 import com.example.chat_demo.core.repository.UserRepository;
-import com.example.chat_demo.omnichannel.model.UnifiedMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

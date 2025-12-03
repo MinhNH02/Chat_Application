@@ -1,4 +1,4 @@
-package com.example.chat_demo.call.repository;
+package com.example.chat_demo.core.repository;
 
 import com.example.chat_demo.core.model.Call;
 import com.example.chat_demo.core.model.Conversation;

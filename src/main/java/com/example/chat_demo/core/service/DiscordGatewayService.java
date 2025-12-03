@@ -1,8 +1,8 @@
-package com.example.chat_demo.omnichannel.service;
+package com.example.chat_demo.core.service;
 
 import com.example.chat_demo.common.ChannelType;
-import com.example.chat_demo.omnichannel.model.UnifiedMessage;
-import com.example.chat_demo.omnichannel.router.OmnichannelRouter;
+import com.example.chat_demo.core.model.UnifiedMessage;
+import com.example.chat_demo.core.router.OmnichannelRouter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.dv8tion.jda.api.JDA;
@@ -113,6 +113,4 @@ public class DiscordGatewayService extends ListenerAdapter {
         }
     }
 }
-
-
 

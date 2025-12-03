@@ -13,7 +13,9 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -177,6 +179,52 @@ public class TelegramConnector implements PlatformConnector {
         HttpHeaders fileHeaders = new HttpHeaders();
         fileHeaders.setContentType(mediaType);
         return fileHeaders;
+    }
+    
+    /**
+     * Gửi message với inline keyboard button (dùng cho call link)
+     * 
+     * @param chatId Telegram chat ID
+     * @param messageText Nội dung message
+     * @param buttonText Text hiển thị trên button
+     * @param buttonUrl URL khi bấm button
+     */
+    public void sendMessageWithButton(String chatId, String messageText, String buttonText, String buttonUrl) {
+        try {
+            String url = telegramApiUrl + botToken + "/sendMessage";
+            log.info("Sending Telegram message with button to {} via {}", chatId, url);
+            
+            // Tạo inline keyboard
+            Map<String, Object> inlineKeyboard = new HashMap<>();
+            Map<String, Object> button = new HashMap<>();
+            button.put("text", buttonText);
+            button.put("url", buttonUrl);
+            
+            List<Map<String, Object>> row = new ArrayList<>();
+            row.add(button);
+            
+            List<List<Map<String, Object>>> keyboard = new ArrayList<>();
+            keyboard.add(row);
+            
+            inlineKeyboard.put("inline_keyboard", keyboard);
+            
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("chat_id", chatId);
+            requestBody.put("text", messageText);
+            requestBody.put("reply_markup", inlineKeyboard);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+            restTemplate.postForObject(url, request, Map.class);
+            
+            log.info("Sent message with button to Telegram user: {}", chatId);
+            
+        } catch (Exception e) {
+            log.error("Error sending message with button to Telegram user: {}", chatId, e);
+            throw new RuntimeException("Failed to send Telegram message with button", e);
+        }
     }
 }
 
