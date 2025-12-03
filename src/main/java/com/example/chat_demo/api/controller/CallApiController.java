@@ -15,9 +15,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 /**
@@ -44,45 +46,60 @@ public class CallApiController {
     public ResponseEntity<InitiateCallResponse> initiateCall(@PathVariable Long id) {
         log.info("[API] POST /api/conversations/{}/calls/initiate", id);
         
-        // Tạo call
+        // Tạo call (bao gồm tạo Jitsi room)
         Call call = callService.initiateCall(id);
         
-        // Lấy conversation và user
+        // Lấy conversation và user (tối ưu: fetch cùng lúc)
         Conversation conversation = conversationRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("Conversation not found: " + id));
         User user = conversation.getUser();
         
-        // Gửi message qua Telegram với inline button
-        String recipientId = user.getPlatformUserId();
-        String messageText = "📞 Staff đang gọi bạn!\n\nBấm nút bên dưới để tham gia cuộc gọi:";
+        // Gửi notification ASYNC (không block response) - Tối ưu tốc độ
+        sendCallNotificationAsync(call, user);
         
-        PlatformConnector connector = connectorFactory.getConnector(user.getChannelType());
-        if (connector instanceof TelegramConnector) {
-            TelegramConnector telegramConnector = (TelegramConnector) connector;
-            telegramConnector.sendMessageWithButton(
-                recipientId,
-                messageText,
-                "📞 Join Call",
-                call.getJitsiRoomUrl()
-            );
-            log.info("Sent call notification to Telegram user {} with room URL {}", recipientId, call.getJitsiRoomUrl());
-        } else {
-            // Platform khác: gửi text message với link
-            connector.sendMessage(recipientId, messageText + "\n\n" + call.getJitsiRoomUrl());
-            log.info("Sent call notification to {} user {} with room URL {}", 
-                user.getChannelType(), recipientId, call.getJitsiRoomUrl());
-        }
-        
-        // Build response
+        // Build response ngay lập tức (không đợi notification)
         InitiateCallResponse response = new InitiateCallResponse();
         response.setCallId(call.getId());
         response.setJitsiRoomUrl(call.getJitsiRoomUrl());
         response.setJitsiRoomId(call.getJitsiRoomId());
-        response.setMessage("Call initiated and notification sent to customer");
+        response.setMessage("Call initiated. Notification is being sent to customer.");
         
-        log.info("Call {} initiated for conversation {}", call.getId(), id);
+        log.info("Call {} initiated for conversation {} (response sent immediately)", call.getId(), id);
         
         return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Gửi notification async để không block response
+     * Tối ưu: Response trả về ngay, notification gửi ở background
+     */
+    @Async("callNotificationExecutor")
+    public CompletableFuture<Void> sendCallNotificationAsync(Call call, User user) {
+        try {
+            String recipientId = user.getPlatformUserId();
+            String messageText = "Staff đang gọi bạn!\n\nBấm nút bên dưới để tham gia cuộc gọi:";
+            
+            PlatformConnector connector = connectorFactory.getConnector(user.getChannelType());
+            if (connector instanceof TelegramConnector) {
+                TelegramConnector telegramConnector = (TelegramConnector) connector;
+                telegramConnector.sendMessageWithButton(
+                    recipientId,
+                    messageText,
+                    "Join Call",
+                    call.getJitsiRoomUrl()
+                );
+                log.info("Sent call notification to Telegram user {} with room URL {}", recipientId, call.getJitsiRoomUrl());
+            } else {
+                // Platform khác: gửi text message với link
+                connector.sendMessage(recipientId, messageText + "\n\n" + call.getJitsiRoomUrl());
+                log.info("Sent call notification to {} user {} with room URL {}", 
+                    user.getChannelType(), recipientId, call.getJitsiRoomUrl());
+            }
+            return CompletableFuture.completedFuture(null);
+        } catch (Exception e) {
+            log.error("Failed to send call notification for call {} to user {}", call.getId(), user.getId(), e);
+            return CompletableFuture.failedFuture(e);
+        }
     }
     
     /**
