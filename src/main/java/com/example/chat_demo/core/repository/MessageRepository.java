@@ -22,5 +22,15 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     List<Message> findOlderMessages(@Param("conversation") Conversation conversation, 
                                     @Param("beforeMessageId") Long beforeMessageId, 
                                     Pageable pageable);
+    
+    // Tìm messages chưa đọc trong conversation
+    List<Message> findByConversationAndStatusNot(Conversation conversation, Message.MessageStatus status);
+    
+    // Đếm số tin nhắn chưa đọc (inbound và chưa read)
+    long countByConversationAndDirectionAndStatusNot(
+        Conversation conversation, 
+        Message.MessageDirection direction, 
+        Message.MessageStatus status
+    );
 }
 

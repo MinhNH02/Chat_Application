@@ -34,9 +34,10 @@ public class JitsiService {
     
     /**
      * Tạo Jitsi room URL từ room ID
+     * Thêm config params để tắt members only mode và lobby
      * 
      * @param roomId Room ID
-     * @return Full Jitsi room URL
+     * @return Full Jitsi room URL với config params
      */
     public String buildRoomUrl(String roomId) {
         // Đảm bảo base URL có protocol
@@ -49,7 +50,22 @@ public class JitsiService {
         // Remove trailing slash
         base = base.replaceAll("/$", "");
         
-        String url = base + "/" + roomId;
+        // Thêm config params để tắt members only mode và lobby
+        // Format: https://meet.jit.si/roomName#config.key=value&config.key2=value2
+        // config.enableLobby=false: Tắt lobby (members only mode) - QUAN TRỌNG
+        // config.prejoinPageEnabled=false: Tắt prejoin page
+        // config.requireDisplayName=false: Không bắt buộc tên
+        // config.enableWelcomePage=false: Tắt welcome page
+        String url = base + "/" + roomId + 
+            "#config.enableLobby=false" +
+            "&config.prejoinPageEnabled=false" +
+            "&config.requireDisplayName=false" +
+            "&config.enableWelcomePage=false" +
+            "&config.startWithAudioMuted=false" +
+            "&config.startWithVideoMuted=false" +
+            "&config.enableNoisyMicDetection=false" +
+            "&config.enableInsecureRoomNameWarning=false";
+        
         log.info("Built Jitsi room URL: {} (roomId: {})", url, roomId);
         return url;
     }

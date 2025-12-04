@@ -34,14 +34,22 @@ public class CallSignalingController {
         String roomId = payload.get("roomId");
         String userId = payload.get("userId");
         
-        log.info("User {} joined call room {}", userId, roomId);
+        log.info("[CALL WS] ===== JOIN CALL =====");
+        log.info("[CALL WS] User {} joined call room {}", userId, roomId);
+        log.info("[CALL WS] Payload: {}", payload);
         
         try {
             Call call = callService.findByRoomId(roomId);
+            log.info("[CALL WS] Call found - ID: {}, CurrentStatus: {}, RoomId: {}, ConversationId: {}", 
+                call.getId(), call.getStatus(), roomId, call.getConversation().getId());
             
             // Update status nếu cần
             if (call.getStatus() == Call.CallStatus.INITIATED || call.getStatus() == Call.CallStatus.RINGING) {
-                callService.updateCallStatus(call.getId(), Call.CallStatus.ACTIVE);
+                log.info("[CALL WS] Updating status from {} to ACTIVE", call.getStatus());
+                call = callService.updateCallStatus(call.getId(), Call.CallStatus.ACTIVE);
+                log.info("[CALL WS] Status updated - ID: {}, NewStatus: {}", call.getId(), call.getStatus());
+            } else {
+                log.info("[CALL WS] Status is already {}, no update needed", call.getStatus());
             }
             
             // Broadcast đến conversation
@@ -55,10 +63,12 @@ public class CallSignalingController {
             String destination = "/topic/conversations/" + call.getConversation().getId() + "/call";
             messagingTemplate.convertAndSend(destination, response);
             
-            log.info("Broadcasted call_joined event to {}", destination);
+            log.info("[CALL WS] Broadcasted call_joined event to {} - CallId: {}, Status: ACTIVE", 
+                destination, call.getId());
+        log.info("[CALL WS] ===== JOIN CALL COMPLETE =====");
             
         } catch (Exception e) {
-            log.error("Error handling join call for room {}", roomId, e);
+            log.error("[CALL WS] Error handling join call for room {}", roomId, e);
         }
     }
     
@@ -72,11 +82,19 @@ public class CallSignalingController {
         String roomId = payload.get("roomId");
         String userId = payload.get("userId");
         
-        log.info("User {} ended call room {}", userId, roomId);
+        log.info("[CALL WS] ===== END CALL =====");
+        log.info("[CALL WS] User {} ended call room {}", userId, roomId);
+        log.info("[CALL WS] Payload: {}", payload);
         
         try {
             Call call = callService.findByRoomId(roomId);
-            callService.updateCallStatus(call.getId(), Call.CallStatus.ENDED);
+            log.info("[CALL WS] Call found - ID: {}, CurrentStatus: {}, RoomId: {}, ConversationId: {}", 
+                call.getId(), call.getStatus(), roomId, call.getConversation().getId());
+            
+            Call.CallStatus oldStatus = call.getStatus();
+            call = callService.updateCallStatus(call.getId(), Call.CallStatus.ENDED);
+            log.info("[CALL WS] Status updated - ID: {}, OldStatus: {}, NewStatus: ENDED", 
+                call.getId(), oldStatus);
             
             Map<String, Object> response = new HashMap<>();
             response.put("type", "call_ended");
@@ -87,10 +105,12 @@ public class CallSignalingController {
             String destination = "/topic/conversations/" + call.getConversation().getId() + "/call";
             messagingTemplate.convertAndSend(destination, response);
             
-            log.info("Broadcasted call_ended event to {}", destination);
+            log.info("[CALL WS] Broadcasted call_ended event to {} - CallId: {}, Status: ENDED", 
+                destination, call.getId());
+        log.info("[CALL WS] ===== END CALL COMPLETE =====");
             
         } catch (Exception e) {
-            log.error("Error handling end call for room {}", roomId, e);
+            log.error("[CALL WS] Error handling end call for room {}", roomId, e);
         }
     }
 }

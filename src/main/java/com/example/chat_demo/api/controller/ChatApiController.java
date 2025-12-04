@@ -24,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -116,8 +117,12 @@ public class ChatApiController {
     @PostMapping("/conversations/{id}/messages")
     public ResponseEntity<MessageDto> sendMessage(
             @PathVariable Long id,
-            @RequestBody SendMessageRequest request) {
+            @RequestBody @Valid SendMessageRequest request) {
         log.info("[API] POST /api/conversations/{}/messages payload={}", id, request);
+        
+        if (request.getContent() == null || request.getContent().trim().isEmpty()) {
+            throw new IllegalArgumentException("Message content cannot be empty");
+        }
         
         Conversation conversation = conversationRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("Conversation not found"));
@@ -320,6 +325,108 @@ public class ChatApiController {
             "url", presignedUrl,
             "filename", message.getAttachmentFilename() != null ? message.getAttachmentFilename() : "file",
             "type", message.getAttachmentType() != null ? message.getAttachmentType() : "document"
+        ));
+    }
+    
+    /**
+     * Mark message as read
+     */
+    @Operation(summary = "Đánh dấu tin nhắn đã đọc", description = "Cập nhật trạng thái message thành READ")
+    @PatchMapping("/messages/{messageId}/read")
+    public ResponseEntity<MessageDto> markMessageAsRead(@PathVariable Long messageId) {
+        log.info("[API] PATCH /api/messages/{}/read", messageId);
+        
+        Message message = messageRepository.findById(messageId)
+            .orElseThrow(() -> new RuntimeException("Message not found"));
+        
+        if (message.getStatus() != Message.MessageStatus.READ) {
+            message.setStatus(Message.MessageStatus.READ);
+            messageRepository.save(message);
+            realtimeMessagePublisher.publish(message);
+            log.info("Message {} marked as read", messageId);
+        }
+        
+        return ResponseEntity.ok(messageMapper.toDto(message));
+    }
+    
+    /**
+     * Mark conversation as read (mark all messages as read)
+     */
+    @Operation(summary = "Đánh dấu conversation đã đọc", description = "Đánh dấu tất cả tin nhắn trong conversation là đã đọc")
+    @PatchMapping("/conversations/{id}/read")
+    public ResponseEntity<Map<String, Object>> markConversationAsRead(@PathVariable Long id) {
+        log.info("[API] PATCH /api/conversations/{}/read", id);
+        
+        Conversation conversation = conversationRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Conversation not found"));
+        
+        List<Message> unreadMessages = messageRepository.findByConversationAndStatusNot(
+            conversation, Message.MessageStatus.READ);
+        
+        int count = 0;
+        for (Message message : unreadMessages) {
+            if (message.getDirection() == Message.MessageDirection.INBOUND) {
+                message.setStatus(Message.MessageStatus.READ);
+                messageRepository.save(message);
+                realtimeMessagePublisher.publish(message);
+                count++;
+            }
+        }
+        
+        log.info("Marked {} messages as read in conversation {}", count, id);
+        
+        return ResponseEntity.ok(Map.of(
+            "conversationId", id,
+            "markedAsRead", count,
+            "message", "Conversation marked as read"
+        ));
+    }
+    
+    /**
+     * Update conversation status
+     */
+    @Operation(summary = "Cập nhật trạng thái conversation", description = "Cập nhật trạng thái conversation (OPEN, CLOSED, PENDING)")
+    @PatchMapping("/conversations/{id}/status")
+    public ResponseEntity<ConversationDto> updateConversationStatus(
+            @PathVariable Long id,
+            @RequestParam String status) {
+        log.info("[API] PATCH /api/conversations/{}/status?status={}", id, status);
+        
+        Conversation conversation = conversationRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Conversation not found"));
+        
+        String oldStatus = conversation.getStatus();
+        conversation.setStatus(status);
+        
+        if ("CLOSED".equals(status) && conversation.getClosedAt() == null) {
+            conversation.setClosedAt(LocalDateTime.now());
+        }
+        
+        conversationRepository.save(conversation);
+        log.info("Updated conversation {} status from {} to {}", id, oldStatus, status);
+        
+        return ResponseEntity.ok(toConversationDto(conversation));
+    }
+    
+    /**
+     * Get unread count for conversation
+     */
+    @Operation(summary = "Lấy số tin nhắn chưa đọc", description = "Đếm số tin nhắn chưa đọc trong conversation")
+    @GetMapping("/conversations/{id}/unread-count")
+    public ResponseEntity<Map<String, Object>> getUnreadCount(@PathVariable Long id) {
+        log.info("[API] GET /api/conversations/{}/unread-count", id);
+        
+        Conversation conversation = conversationRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Conversation not found"));
+        
+        long unreadCount = messageRepository.countByConversationAndDirectionAndStatusNot(
+            conversation, Message.MessageDirection.INBOUND, Message.MessageStatus.READ);
+        
+        log.info("Unread count for conversation {}: {}", id, unreadCount);
+        
+        return ResponseEntity.ok(Map.of(
+            "conversationId", id,
+            "unreadCount", unreadCount
         ));
     }
     
